@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   IonPage,
   IonContent,
@@ -8,10 +8,32 @@ import {
   IonHeader,
 } from '@ionic/react';
 import { callOutline, videocamOutline, closeCircleOutline, closeOutline, timeOutline, chevronForwardOutline } from 'ionicons/icons';
-import { mockCallHistory, CallRecord } from '../../services/mockData';
+import { CallRecord } from '../../services/mockData';
+import { BACKEND_URL } from '../../services/api';
 
 export const CallHistoryScreen = () => {
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
+  const [historyData, setHistoryData] = useState<CallRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/historial`);
+        if (response.ok) {
+          const data = await response.json();
+          setHistoryData(data);
+        } else {
+          console.error("Error fetching history:", response.statusText);
+        }
+      } catch (error) {
+        console.error("Error fetching history", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchHistory();
+  }, []);
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -42,7 +64,7 @@ export const CallHistoryScreen = () => {
             <div>
               <h1 style={{ color: "#fff", fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>Historial</h1>
               <p style={{ color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 500 }}>
-                {mockCallHistory.length} llamada{mockCallHistory.length !== 1 ? 's' : ''} registrada{mockCallHistory.length !== 1 ? 's' : ''}
+                {loading ? 'Cargando...' : `${historyData.length} llamada${historyData.length !== 1 ? 's' : ''} registrada${historyData.length !== 1 ? 's' : ''}`}
               </p>
             </div>
           </div>
@@ -51,7 +73,9 @@ export const CallHistoryScreen = () => {
         {/* Call List */}
         <div className="px-5 -mt-4">
           <div className="flex flex-col gap-3">
-            {mockCallHistory.map((call) => (
+            {loading ? (
+              <div className="text-center py-8 text-gray-500">Cargando historial...</div>
+            ) : historyData.map((call) => (
               <div
                 key={call.id}
                 onClick={() => setSelectedCall(call)}

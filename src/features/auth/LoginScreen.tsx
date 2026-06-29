@@ -3,6 +3,7 @@ import { Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { IonPage, IonContent, IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonCheckbox, IonItem, IonLabel, IonFooter } from "@ionic/react";
 import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
+import { initSocket } from "../../services/api";
 
 function formatRut(value: string): string {
   const clean = value.replace(/[^0-9kK]/g, "");
@@ -49,6 +50,11 @@ export function LoginScreen() {
     setLoading(false);
     
     setLogin(rut, "Carlos Pérez");
+    
+    // Initialize socket and emit online status
+    const socket = initSocket(rut);
+    socket.emit("operator-online", { rut, name: "Carlos Pérez" });
+
     history.push("/phone-setup");
   };
 

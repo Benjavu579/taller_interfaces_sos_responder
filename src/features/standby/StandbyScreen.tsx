@@ -4,6 +4,7 @@ import { IonPage, IonContent, useIonModal } from "@ionic/react";
 import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
 import { IncomingCall } from "../video-call/IncomingCall";
+import EmergencyAlarm from "../../services/EmergencyAlarm";
 
 export function StandbyScreen() {
   const [time, setTime] = useState(new Date());
@@ -14,6 +15,15 @@ export function StandbyScreen() {
   const [showIncomingCall, setShowIncomingCall] = useState(false);
 
   useEffect(() => {
+    const requestPermissions = async () => {
+      try {
+        await EmergencyAlarm.requestPermissions();
+      } catch (err) {
+        console.error("Error al pedir permisos nativos", err);
+      }
+    };
+    requestPermissions();
+
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -32,8 +42,32 @@ export function StandbyScreen() {
     history.replace("/login");
   };
 
-  const handleIncomingCall = () => {
+  const handleIncomingCall = async () => {
+    try {
+      await EmergencyAlarm.startAlarm();
+    } catch (e) {
+      console.error("Error starting alarm plugin:", e);
+    }
     setShowIncomingCall(true);
+  };
+
+  const handleAnswerCall = async () => {
+    try {
+      await EmergencyAlarm.stopAlarm();
+    } catch (e) {
+      console.error("Error stopping alarm:", e);
+    }
+    setShowIncomingCall(false);
+    history.push('/call');
+  };
+
+  const handleRejectCall = async () => {
+    try {
+      await EmergencyAlarm.stopAlarm();
+    } catch (e) {
+      console.error("Error stopping alarm:", e);
+    }
+    setShowIncomingCall(false);
   };
 
   return (
@@ -164,11 +198,8 @@ export function StandbyScreen() {
           <div className="fixed inset-0 z-50">
             <IncomingCall 
               callerName="María González" 
-              onAnswer={() => {
-                setShowIncomingCall(false);
-                history.push('/call');
-              }}
-              onReject={() => setShowIncomingCall(false)}
+              onAnswer={handleAnswerCall}
+              onReject={handleRejectCall}
             />
           </div>
         )}

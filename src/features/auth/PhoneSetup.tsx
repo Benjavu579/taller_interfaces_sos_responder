@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Lock } from "lucide-react";
 import { IonPage, IonContent } from "@ionic/react";
 import { useHistory } from "react-router";
@@ -11,15 +11,28 @@ export function PhoneSetup() {
   const userName = useAppStore(state => state.userName);
   const setPhoneAction = useAppStore(state => state.setPhone);
 
+  useEffect(() => {
+    // Clear state on mount just in case Ionic cached the view
+    setPhone("");
+    setError("");
+  }, []);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const digits = e.target.value.replace(/\D/g, "").slice(0, 8);
     setPhone(digits);
     setError("");
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (phone.length < 8) { setError("Ingresa los 8 dígitos restantes."); return; }
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      stream.getTracks().forEach(track => track.stop());
+    } catch (err) {
+      console.warn("El usuario denegó permisos o no hay cámara", err);
+    }
+
     setPhoneAction("9" + phone);
     history.push("/tabs/main");
   };
@@ -62,6 +75,8 @@ export function PhoneSetup() {
                     </span>
                     <input
                       type="tel"
+                      name="user-phone-setup"
+                      autoComplete="off"
                       value={phone}
                       onChange={handleChange}
                       placeholder="XXXX XXXX"
