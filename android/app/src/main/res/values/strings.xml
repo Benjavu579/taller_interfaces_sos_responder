@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SOS-Responder</string>
+    <string name="title_activity_main">SOS-Responder</string>
+    <string name="package_name">com.sos.responder</string>
+    <string name="custom_url_scheme">com.sos.responder</string>
+</resources>

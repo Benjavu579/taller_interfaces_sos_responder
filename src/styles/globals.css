@@ -1,0 +1,14 @@
+/* Forzar que el modal de términos NO tenga scroll interno a nivel de Ionic */
+ion-modal.terms-modal .ion-page,
+ion-modal.terms-modal ion-content,
+ion-modal.terms-modal .modal-wrapper,
+ion-modal.terms-modal .ion-delegate-host {
+  overflow: hidden !important;
+  contain: layout style !important;
+}
+
+ion-modal.terms-modal .ion-page {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
