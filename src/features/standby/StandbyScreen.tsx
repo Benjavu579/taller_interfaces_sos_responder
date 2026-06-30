@@ -80,6 +80,15 @@ export function StandbyScreen() {
         rut: userRut
       });
       console.log("Re-registrando operador al volver a la pantalla principal");
+
+      // Re-agregar listener de llamada entrante para que funcione la segunda llamada.
+      // El listener del useEffect inicial puede haberse perdido tras la navegación.
+      socket.off("incoming-call");
+      socket.on("incoming-call", (data: any) => {
+        console.log("Incoming call (re-registered):", data);
+        setCallerData(data);
+        handleIncomingCall();
+      });
     }
   });
 

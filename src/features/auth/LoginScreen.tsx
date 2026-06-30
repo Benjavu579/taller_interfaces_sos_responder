@@ -55,19 +55,19 @@ export function LoginScreen() {
       
       setLogin(rut, realName);
       
-      if (rut === "11.111.111-1" && response.data?.phone) {
+      if (response.data?.phone) {
         setPhone(response.data.phone);
-        const socket = initSocket(rut);
-        socket.emit("operator-online", { rut, name: realName });
+      }
+      
+      const socket = initSocket(rut);
+      socket.emit("operator-online", { rut, name: realName });
+      
+      if (response.data?.phone) {
         socket.emit("register-operator", { 
           phone: response.data.phone, 
           name: realName,
           rut: rut
         });
-      } else {
-        // Initialize socket and emit online status
-        const socket = initSocket(rut);
-        socket.emit("operator-online", { rut, name: realName });
       }
 
       history.replace("/");

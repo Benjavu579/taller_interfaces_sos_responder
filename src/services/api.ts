@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { Capacitor } from '@capacitor/core';
+import { useAppStore } from '../store/useAppStore';
 
 // Por defecto usamos localhost para la web, pero en Android necesitas la IP local
 // Puedes reemplazar la IP 192.168.1.X por la IP de tu computadora en tu red Wi-Fi
@@ -19,6 +20,15 @@ export const initSocket = (userId?: string): Socket => {
 
     socket.on('connect', () => {
       console.log('✅ Conectado al servidor Socket.IO');
+      const state = useAppStore.getState();
+      if (state.userPhone && state.userRut) {
+        socket?.emit('register-operator', {
+          phone: state.userPhone,
+          name: state.userName || 'Operador',
+          rut: state.userRut
+        });
+        console.log('🔄 Operador re-registrado en el servidor tras reconexión');
+      }
     });
 
     socket.on('connect_error', (error) => {

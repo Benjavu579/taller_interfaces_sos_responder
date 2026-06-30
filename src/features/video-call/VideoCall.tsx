@@ -77,6 +77,11 @@ export function VideoCall() {
           console.log("ICE state:", pc?.iceConnectionState);
         };
 
+        // Limpiar listeners WebRTC antes de agregar nuevos (evitar duplicados en segunda llamada)
+        socket.off("webrtc-offer");
+        socket.off("webrtc-ice-candidate");
+        socket.off("call-ended");
+
         // 6. Escuchar eventos de señalización ANTES de join-call
         socket.on("webrtc-offer", async (offer) => {
           console.log("📨 Offer recibida del sordo");
@@ -141,6 +146,13 @@ export function VideoCall() {
   };
 
   const handleHangup = () => {
+    const socket = getSocket();
+    if (socket) {
+      socket.emit("leave-call", { roomId });
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    pcRef.current?.close();
+    pcRef.current = null;
     history.goBack();
   };
 
