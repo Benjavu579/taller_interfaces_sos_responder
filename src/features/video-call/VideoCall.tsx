@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Volume2, VolumeX, RotateCcw } from "lucide-react";
+import { Mic, MicOff, Camera, CameraOff, PhoneOff } from "lucide-react";
 import { IonPage, IonContent } from "@ionic/react";
 import { useHistory } from "react-router";
 import { getSocket } from "../../services/api";
@@ -13,67 +13,102 @@ export function VideoCall() {
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
-  const [speakerOn, setSpeakerOn] = useState(true);
   const [duration, setDuration] = useState(0);
-  const [streamReady, setStreamReady] = useState(false);
   const [remoteStreamReady, setRemoteStreamReady] = useState(false);
   const history = useHistory();
-  const callerName = "María González"; // Default mock
-  const roomId = "emergency-room-1";
+  const location = history.location as any;
+  const callerData = location.state?.callerData;
+  const callerName = callerData?.caller || "Desconocido";
+  const roomId = callerData?.roomId || "emergency-room-1";
 
   useEffect(() => {
     // Detener la alarma nativa cuando el guardia contesta
     EmergencyAlarm.stopAlarm().catch(console.error);
 
     const socket = getSocket();
-    if (socket) {
-      socket.emit("join-call", { roomId });
+    if (!socket) {
+      console.error("No hay socket disponible");
+      return;
     }
+
+    let pc: RTCPeerConnection | null = null;
 
     const initWebRTC = async () => {
       try {
+        // 1. Obtener stream local primero
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         streamRef.current = stream;
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-        setStreamReady(true);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+          localVideoRef.current.play().catch(() => {});
+        }
 
-        const pc = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        // 2. Crear PeerConnection
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" }
+          ]
         });
         pcRef.current = pc;
 
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        // 3. Agregar tracks locales al PC
+        stream.getTracks().forEach(track => pc!.addTrack(track, stream));
 
+        // 4. Cuando llega video remoto, asignarlo
         pc.ontrack = (event) => {
+          console.log("📹 Track remoto recibido:", event.streams[0]);
+          const remoteStream = event.streams[0];
           if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-            setRemoteStreamReady(true);
+            remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.play().catch(e => console.error("Error play remote:", e));
           }
+          setRemoteStreamReady(true);
         };
 
+        // 5. Enviar ICE candidates
         pc.onicecandidate = (event) => {
           if (event.candidate && socket) {
-            socket.emit("ice-candidate", { candidate: event.candidate, roomId });
+            socket.emit("webrtc-ice-candidate", { candidate: event.candidate, roomId });
           }
         };
 
-        if (socket) {
-          socket.on("webrtc-offer", async (data) => {
-            if (!pcRef.current) return;
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
-            const answer = await pcRef.current.createAnswer();
-            await pcRef.current.setLocalDescription(answer);
-            socket.emit("webrtc-answer", { answer, roomId });
-          });
+        pc.oniceconnectionstatechange = () => {
+          console.log("ICE state:", pc?.iceConnectionState);
+        };
 
-          socket.on("ice-candidate", async (data) => {
-            if (data.candidate && pcRef.current) {
-              await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        // 6. Escuchar eventos de señalización ANTES de join-call
+        socket.on("webrtc-offer", async (offer) => {
+          console.log("📨 Offer recibida del sordo");
+          if (!pcRef.current || !offer) return;
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await pcRef.current.createAnswer();
+          await pcRef.current.setLocalDescription(answer);
+          socket.emit("webrtc-answer", { answer, roomId });
+          console.log("📤 Answer enviada");
+        });
+
+        socket.on("webrtc-ice-candidate", async (candidate) => {
+          if (candidate && pcRef.current) {
+            try {
+              await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+              console.warn("Error agregando ICE candidate:", e);
             }
-          });
-        }
+          }
+        });
+
+        socket.on("call-ended", () => {
+          console.log("El otro usuario cortó la llamada");
+          history.goBack();
+        });
+
+        // 7. Emitir join-call SOLO cuando todo está listo
+        console.log("✅ WebRTC listo, uniéndose a la sala:", roomId);
+        socket.emit("join-call", { roomId });
+
       } catch (err) {
-        console.error("Error accediendo a la cámara/mic o inicializando WebRTC", err);
+        console.error("Error accediendo a la cámara/mic o inicializando WebRTC:", err);
       }
     };
 
@@ -85,10 +120,12 @@ export function VideoCall() {
       clearInterval(timer);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       pcRef.current?.close();
+      pcRef.current = null;
       if (socket) {
         socket.emit("leave-call", { roomId });
         socket.off("webrtc-offer");
-        socket.off("ice-candidate");
+        socket.off("webrtc-ice-candidate");
+        socket.off("call-ended");
       }
     };
   }, []);
@@ -107,127 +144,199 @@ export function VideoCall() {
     history.goBack();
   };
 
-  const fmt = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+  };
 
-  const ControlBtn = ({
-    onClick,
-    active = true,
-    children,
-  }: { onClick?: () => void; active?: boolean; children: React.ReactNode }) => (
-    <button onClick={onClick}
-      className="flex items-center justify-center"
-      style={{
-        width: 54,
-        height: 54,
-        borderRadius: "50%",
-        background: active ? "#fff" : "#F4F6F8",
-        border: active ? "none" : "1.5px solid #E0E0E0",
-        boxShadow: "0 2px 10px rgba(0,0,0,0.1)",
-        cursor: "pointer",
-      }}>
-      {children}
-    </button>
-  );
+  const initials = callerName
+    .split(" ")
+    .slice(0, 2)
+    .map((w: string) => w[0])
+    .join("")
+    .toUpperCase();
 
   return (
     <IonPage>
-      <IonContent>
-        <div className="min-h-screen flex flex-col" style={{ background: "#E8F5E2" }}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-5 pt-10 pb-4"
-            style={{ background: "#43A047", borderBottomLeftRadius: 24, borderBottomRightRadius: 24 }}>
-            <div>
-              <p style={{ color: "rgba(255,255,255,0.8)", fontSize: 12 }}>En llamada</p>
-              <p style={{ color: "#fff", fontSize: 18, fontWeight: 700 }}>{callerName}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
-              <span style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>{fmt(duration)}</span>
-            </div>
+      <IonContent style={{ '--background': '#0f0f1a' }}>
+        <div
+          style={{
+            minHeight: "100%",
+            position: "relative",
+            overflow: "hidden",
+            backgroundColor: "#0f0f1a",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {/* Main video area (remote) */}
+          <div style={{ position: "absolute", inset: 0, backgroundColor: "#1a1a2e" }}>
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
           </div>
 
-          {/* Video area */}
-          <div className="flex-1 relative flex items-center justify-center mx-4 mt-4 rounded-2xl overflow-hidden"
-            style={{ background: "#C8E6C9", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" }}>
-
-            {/* Remote caller connection state */}
-            <div className="absolute inset-0 w-full h-full bg-black">
-              <video ref={remoteVideoRef} autoPlay playsInline className={`w-full h-full object-cover ${remoteStreamReady ? 'opacity-100' : 'opacity-0'}`} />
-            </div>
-            
-            {!remoteStreamReady && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center w-full h-full" style={{ background: "#C8E6C9", zIndex: 10 }}>
-                 <div className="w-12 h-12 border-4 border-[#43A047] border-t-transparent rounded-full animate-spin mb-4" />
-                 <p style={{ color: "#1B5E20", fontSize: 16, fontWeight: 600 }}>Conectando con operador...</p>
-              </div>
+          {/* Local video small */}
+          <div style={{ 
+            position: "absolute", 
+            top: "20px", 
+            right: "20px", 
+            width: "100px", 
+            height: "144px", 
+            borderRadius: "14px", 
+            overflow: "hidden",
+            zIndex: 20,
+            border: "2px solid rgba(255,255,255,0.5)",
+            backgroundColor: "#2c2c3a"
+          }}>
+            {camOn && (
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
+                style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }}
+              />
             )}
+          </div>
 
-            {/* Self view */}
-            <div className="absolute top-4 right-4 overflow-hidden"
+          {/* Top info */}
+          <div
+            style={{
+              position: "relative",
+              zIndex: 10,
+              paddingTop: "70px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "12px",
+            }}
+          >
+            {/* Avatar */}
+            <div
               style={{
-                width: 100,
-                height: 144,
-                borderRadius: 14,
-                border: "2.5px solid #43A047",
-                background: "#A5D6A7",
-                boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-                zIndex: 20
-              }}>
-              {streamReady && camOn ? (
-                <video ref={localVideoRef} autoPlay muted playsInline
-                  className="w-full h-full object-cover"
-                  style={{ transform: "scaleX(-1)" }} />
+                width: "80px",
+                height: "80px",
+                borderRadius: "50%",
+                backgroundColor: "#1d4ed8",
+                border: "3px solid rgba(255,255,255,0.3)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "24px",
+                fontWeight: 700,
+                color: "white",
+              }}
+            >
+              {initials}
+            </div>
+
+            {/* Name */}
+            <p style={{ color: "white", fontSize: "20px", fontWeight: 700, margin: 0, textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>
+              {callerName}
+            </p>
+
+            {/* Status / timer */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                backgroundColor: "rgba(0,0,0,0.4)",
+                borderRadius: "20px",
+                padding: "6px 14px",
+              }}
+            >
+              {!remoteStreamReady ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+                  <span style={{ color: "rgba(255,255,255,0.9)", fontSize: "13px" }}>Conectando cámara y operador...</span>
+                </>
               ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <VideoOff className="w-8 h-8" style={{ color: "#66BB6A" }} />
-                </div>
+                <>
+                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  <span style={{ color: "rgba(255,255,255,0.9)", fontSize: "13px", fontVariantNumeric: "tabular-nums" }}>
+                    {formatTime(duration)}
+                  </span>
+                </>
               )}
             </div>
           </div>
 
-          {/* Controls */}
-          <div className="px-6 py-6">
-            <div className="flex items-center justify-center gap-4">
-              <ControlBtn onClick={() => setSpeakerOn(v => !v)} active={speakerOn}>
-                {speakerOn
-                  ? <Volume2 className="w-5 h-5" style={{ color: "#333" }} />
-                  : <VolumeX className="w-5 h-5" style={{ color: "#aaa" }} />}
-              </ControlBtn>
+          {/* Bottom controls */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              zIndex: 10,
+              padding: "24px 32px 36px",
+              background: "linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "20px",
+            }}
+          >
+            {/* Mute */}
+            <button
+              onClick={toggleMic}
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                backgroundColor: !micOn ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.2)",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+            >
+              {!micOn ? <MicOff size={22} color="#1e293b" /> : <Mic size={22} color="white" />}
+            </button>
 
-              <ControlBtn onClick={toggleMic} active={micOn}>
-                {micOn
-                  ? <Mic className="w-5 h-5" style={{ color: "#333" }} />
-                  : <MicOff className="w-5 h-5" style={{ color: "#E53935" }} />}
-              </ControlBtn>
+            {/* End call */}
+            <button
+              onClick={handleHangup}
+              style={{
+                width: "68px",
+                height: "68px",
+                borderRadius: "50%",
+                backgroundColor: "#dc2626",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 4px 20px rgba(220,38,38,0.6)",
+              }}
+            >
+              <PhoneOff size={28} color="white" />
+            </button>
 
-              {/* Hangup */}
-              <button onClick={handleHangup}
-                className="flex items-center justify-center"
-                style={{
-                  width: 68,
-                  height: 68,
-                  borderRadius: "50%",
-                  background: "#E53935",
-                  boxShadow: "0 6px 0px #B71C1C, 0 8px 20px rgba(229,57,53,0.45)",
-                  border: "none",
-                  cursor: "pointer",
-                }}>
-                <PhoneOff className="w-7 h-7 text-white" />
-              </button>
-
-              <ControlBtn onClick={toggleCam} active={camOn}>
-                {camOn
-                  ? <Video className="w-5 h-5" style={{ color: "#333" }} />
-                  : <VideoOff className="w-5 h-5" style={{ color: "#E53935" }} />}
-              </ControlBtn>
-
-              <ControlBtn>
-                <RotateCcw className="w-5 h-5" style={{ color: "#333" }} />
-              </ControlBtn>
-            </div>
-            <p className="text-center mt-4" style={{ color: "#888", fontSize: 12 }}>
-              Videollamada segura cifrada
-            </p>
+            {/* Camera */}
+            <button
+              onClick={toggleCam}
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                backgroundColor: !camOn ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.2)",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+            >
+              {!camOn ? <CameraOff size={22} color="#1e293b" /> : <Camera size={22} color="white" />}
+            </button>
           </div>
         </div>
       </IonContent>

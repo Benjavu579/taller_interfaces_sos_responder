@@ -3,6 +3,7 @@ import { Lock } from "lucide-react";
 import { IonPage, IonContent } from "@ionic/react";
 import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
+import { initSocket } from "../../services/api";
 
 export function PhoneSetup() {
   const [phone, setPhone] = useState("");
@@ -18,7 +19,8 @@ export function PhoneSetup() {
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPhone(digits);
+    const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+    setPhone(val);
     setError("");
   };
 
@@ -33,7 +35,17 @@ export function PhoneSetup() {
       console.warn("El usuario denegó permisos o no hay cámara", err);
     }
 
-    setPhoneAction("9" + phone);
+    const fullPhone = "+569" + phone;
+    setPhoneAction(fullPhone);
+    
+    // Registrar el operador en el backend
+    const socket = initSocket(useAppStore.getState().userRut || "operator");
+    socket.emit("register-operator", { 
+      phone: fullPhone, 
+      name: userName || "Operador",
+      rut: useAppStore.getState().userRut
+    });
+
     history.push("/tabs/main");
   };
 
@@ -75,11 +87,10 @@ export function PhoneSetup() {
                     </span>
                     <input
                       type="tel"
-                      name="user-phone-setup"
-                      autoComplete="off"
+                      maxLength={8}
+                      placeholder="12345678"
                       value={phone}
                       onChange={handleChange}
-                      placeholder="XXXX XXXX"
                       className="flex-1 bg-transparent focus:outline-none px-3"
                       style={{ color: "#222", fontSize: 16, padding: "12px 12px" }}
                     />

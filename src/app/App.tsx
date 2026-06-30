@@ -22,10 +22,12 @@ import '@ionic/react/css/display.css';
 
 import { LoginScreen } from '../features/auth/LoginScreen';
 import { PhoneSetup } from '../features/auth/PhoneSetup';
+import { CreatePinScreen } from '../features/auth/CreatePinScreen';
 import { VideoCall } from '../features/video-call/VideoCall';
 import { Tabs } from '../components/Tabs';
 import { useAppStore } from '../store/useAppStore';
 import { LockScreen } from '../components/LockScreen';
+
 
 setupIonicReact({
   mode: 'ios', // Usamos ios mode por defecto para un look más nativo
@@ -34,13 +36,14 @@ setupIonicReact({
 export default function App() {
   const isLoggedIn = useAppStore(state => state.isLoggedIn);
   const isPhoneSetup = useAppStore(state => state.isPhoneSetup);
+  const hasAppPin = useAppStore(state => state.hasAppPin);
   const isUnlocked = useAppStore(state => state.isUnlocked);
   const setUnlocked = useAppStore(state => state.setUnlocked);
 
   useEffect(() => {
     const listener = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
-      // Bloquear la app en cuanto se va al segundo plano
-      if (!isActive && isLoggedIn) {
+      // Bloquear la app en cuanto se va al segundo plano, solo si ya configuró el PIN
+      if (!isActive && isLoggedIn && hasAppPin) {
         setUnlocked(false);
       }
     });
@@ -48,7 +51,8 @@ export default function App() {
     return () => {
       listener.then(l => l.remove());
     };
-  }, [isLoggedIn, setUnlocked]);
+  }, [isLoggedIn, setUnlocked, hasAppPin]);
+
 
   return (
     <IonApp>
@@ -57,6 +61,9 @@ export default function App() {
           {/* Rutas de Autenticación */}
           <Route exact path="/login">
             <LoginScreen />
+          </Route>
+          <Route exact path="/create-pin">
+            <CreatePinScreen />
           </Route>
           <Route exact path="/phone-setup">
             <PhoneSetup />
@@ -73,7 +80,11 @@ export default function App() {
           {/* Redirección Inicial basada en el estado */}
           <Route exact path="/">
             {isLoggedIn ? (
-              isPhoneSetup ? <Redirect to="/tabs/main" /> : <Redirect to="/phone-setup" />
+              hasAppPin ? (
+                isPhoneSetup ? <Redirect to="/tabs/main" /> : <Redirect to="/phone-setup" />
+              ) : (
+                <Redirect to="/create-pin" />
+              )
             ) : (
               <Redirect to="/login" />
             )}
@@ -81,8 +92,8 @@ export default function App() {
         </IonRouterOutlet>
       </IonReactRouter>
 
-      {/* Pantalla de bloqueo de seguridad biométrica */}
-      {isLoggedIn && !isUnlocked && <LockScreen />}
+      {/* Pantalla de bloqueo (Ingreso PIN/Biometría) al abrir o reanudar */}
+      {isLoggedIn && hasAppPin && !isUnlocked && <LockScreen />}
     </IonApp>
   );
 }

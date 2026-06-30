@@ -1,40 +1,95 @@
 import { useEffect, useState } from "react";
 import { Phone, LogOut, Wifi, Bell } from "lucide-react";
-import { IonPage, IonContent, useIonModal } from "@ionic/react";
+import { IonPage, IonContent, useIonViewWillEnter } from "@ionic/react";
 import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
 import { IncomingCall } from "../video-call/IncomingCall";
 import EmergencyAlarm from "../../services/EmergencyAlarm";
+import { getSocket, initSocket } from "../../services/api";
 
 export function StandbyScreen() {
   const [time, setTime] = useState(new Date());
   const history = useHistory();
   const userName = useAppStore(state => state.userName);
   const phone = useAppStore(state => state.userPhone);
+  const userRut = useAppStore(state => state.userRut);
   const logout = useAppStore(state => state.logout);
   const [showIncomingCall, setShowIncomingCall] = useState(false);
+  const [callerData, setCallerData] = useState<any>(null);
 
   useEffect(() => {
     const requestPermissions = async () => {
-      try {
-        await EmergencyAlarm.requestPermissions();
-      } catch (err) {
-        console.error("Error al pedir permisos nativos", err);
+      const asked = localStorage.getItem("dnd_asked");
+      if (!asked) {
+        try {
+          await EmergencyAlarm.requestPermissions();
+        } catch (err) {
+          console.error("Error al pedir permisos nativos", err);
+        }
+
+        try {
+          // Pedir permisos de audio y video por primera y única vez
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          stream.getTracks().forEach(track => track.stop());
+        } catch (err) {
+          console.error("Error al pedir permisos de cámara y micrófono", err);
+        }
+
+        localStorage.setItem("dnd_asked", "true");
       }
     };
     requestPermissions();
 
+    const socket = initSocket();
+
+    const registerOp = () => {
+      if (phone) {
+        socket.emit("register-operator", {
+          phone: phone,
+          name: userName || "Operador",
+          rut: userRut
+        });
+        console.log("Operador registrado/re-registrado en el socket con teléfono:", phone);
+      }
+    };
+
+    // El registro inicial y las reconexiones se manejan
+    // en useIonViewWillEnter y a través de un listener unificado más abajo si es necesario.
+
+    const handleIncoming = (data: any) => {
+      console.log("Incoming call:", data);
+      setCallerData(data);
+      handleIncomingCall();
+    };
+
+    socket.on('incoming-call', handleIncoming);
+
     const t = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(t);
+    return () => {
+      clearInterval(t);
+      socket.off('incoming-call', handleIncoming);
+    };
   }, []);
+
+  useIonViewWillEnter(() => {
+    const socket = getSocket();
+    if (socket && phone && userRut) {
+      socket.emit("register-operator", {
+        phone,
+        name: userName || "Operador",
+        rut: userRut
+      });
+      console.log("Re-registrando operador al volver a la pantalla principal");
+    }
+  });
 
   const timeStr = time.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
   const dateStr = time.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" });
   const dateFormatted = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
 
   const firstName = userName ? userName.split(" ")[0] : "Usuario";
-  const formattedPhone = phone && phone.length >= 9
-    ? `+56 ${phone.slice(0, 1)} ${phone.slice(1, 5)} ${phone.slice(5)}`
+  const formattedPhone = phone && phone.startsWith("+569") && phone.length === 12
+    ? `+56 9 ${phone.slice(4, 8)} ${phone.slice(8)}`
     : phone;
 
   const handleLogout = () => {
@@ -58,7 +113,10 @@ export function StandbyScreen() {
       console.error("Error stopping alarm:", e);
     }
     setShowIncomingCall(false);
-    history.push('/call');
+    history.push({
+      pathname: '/call',
+      state: { callerData }
+    });
   };
 
   const handleRejectCall = async () => {
@@ -67,7 +125,12 @@ export function StandbyScreen() {
     } catch (e) {
       console.error("Error stopping alarm:", e);
     }
+    const socket = initSocket();
+    if (callerData?.roomId) {
+      socket.emit('reject-call', { roomId: callerData.roomId });
+    }
     setShowIncomingCall(false);
+    setCallerData(null);
   };
 
   return (
@@ -191,13 +254,13 @@ export function StandbyScreen() {
             </button>
           </div>
         </div>
-        
+
         {/* We use a Modal or just conditional rendering for Incoming Call?
             Using history.push('/incoming') is better for full screen. */}
         {showIncomingCall && (
           <div className="fixed inset-0 z-50">
-            <IncomingCall 
-              callerName="María González" 
+            <IncomingCall
+              callerName={callerData?.caller || "Paciente Desconocido"}
               onAnswer={handleAnswerCall}
               onReject={handleRejectCall}
             />

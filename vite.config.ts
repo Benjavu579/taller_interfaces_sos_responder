@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
 function figmaAssetResolver() {
   return {
@@ -23,6 +23,7 @@ export default defineConfig({
     // Tailwind is not being actively used – do not remove them
     react(),
     tailwindcss(),
+    basicSsl(),
   ],
   resolve: {
     alias: {
@@ -33,4 +34,20 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+  
+  server: {
+    host: true, // Permite acceder a la app desde otros dispositivos en la red local
+    https: true, // Requerido para acceder a la cámara desde otros dispositivos
+    proxy: {
+      '/api': {
+        target: 'http://192.168.1.20:3000',
+        changeOrigin: true
+      },
+      '/socket.io': {
+        target: 'http://192.168.1.20:3000',
+        ws: true,
+        changeOrigin: true
+      }
+    }
+  }
 })

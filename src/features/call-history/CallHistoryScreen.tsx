@@ -116,7 +116,9 @@ export const CallHistoryScreen = () => {
                     >
                       {getStatusLabel(call.status)}
                     </span>
-                    <span className="text-[12px] text-gray-400">{call.date}</span>
+                    <span className="text-[12px] text-gray-400">
+                      {new Date(call.date).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
                 </div>
 

@@ -21,7 +21,7 @@ export const Tabs = () => {
           <Redirect to="/tabs/main" />
         </Route>
       </IonRouterOutlet>
-      <IonTabBar slot="bottom" style={{ "--background": "#fff", "--border": "1px solid #E8ECF0", paddingTop: 6, paddingBottom: "env(safe-area-inset-bottom, 8px)" }}>
+      <IonTabBar slot="bottom" style={{ "--background": "#fff", "--border": "1px solid #E8ECF0", paddingTop: "6px", paddingBottom: "env(safe-area-inset-bottom, 8px)" }}>
         <IonTabButton tab="main" href="/tabs/main" style={{ "--color-selected": "#2E7D32", "--color": "#999" }}>
           <IonIcon icon={homeOutline} />
           <IonLabel className="font-semibold" style={{ fontSize: 11 }}>Principal</IonLabel>

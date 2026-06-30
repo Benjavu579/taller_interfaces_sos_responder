@@ -1,5 +1,9 @@
 {
   "appId": "com.sos.responder",
   "appName": "SOS-Responder",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "androidScheme": "http"
+  }
 }

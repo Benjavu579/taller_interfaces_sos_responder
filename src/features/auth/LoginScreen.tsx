@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Eye, EyeOff, AlertTriangle } from "lucide-react";
-import { IonPage, IonContent, IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonCheckbox, IonItem, IonLabel, IonFooter } from "@ionic/react";
+import { IonPage, IonContent, IonModal } from "@ionic/react";
 import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
-import { initSocket } from "../../services/api";
+import { initSocket, loginOperator } from "../../services/api";
 
 function formatRut(value: string): string {
   const clean = value.replace(/[^0-9kK]/g, "");
@@ -32,6 +32,7 @@ export function LoginScreen() {
 
   const history = useHistory();
   const setLogin = useAppStore(state => state.setLogin);
+  const setPhone = useAppStore(state => state.setPhone);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,16 +47,35 @@ export function LoginScreen() {
     if (password.length < 4) { setError("Contraseña debe tener al menos 4 caracteres."); return; }
     
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    setLoading(false);
     
-    setLogin(rut, "Carlos Pérez");
-    
-    // Initialize socket and emit online status
-    const socket = initSocket(rut);
-    socket.emit("operator-online", { rut, name: "Carlos Pérez" });
+    try {
+      const response = await loginOperator(rut, password);
+      
+      const realName = response.data?.name || "Operador";
+      
+      setLogin(rut, realName);
+      
+      if (rut === "11.111.111-1" && response.data?.phone) {
+        setPhone(response.data.phone);
+        const socket = initSocket(rut);
+        socket.emit("operator-online", { rut, name: realName });
+        socket.emit("register-operator", { 
+          phone: response.data.phone, 
+          name: realName,
+          rut: rut
+        });
+      } else {
+        // Initialize socket and emit online status
+        const socket = initSocket(rut);
+        socket.emit("operator-online", { rut, name: realName });
+      }
 
-    history.push("/phone-setup");
+      history.replace("/");
+    } catch (err: any) {
+      setError(err.message || "Error al iniciar sesión.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
