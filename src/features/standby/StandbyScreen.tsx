@@ -5,7 +5,7 @@ import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
 import { IncomingCall } from "../video-call/IncomingCall";
 import EmergencyAlarm from "../../services/EmergencyAlarm";
-import { getSocket, initSocket } from "../../services/api";
+import { supabase } from "../../supabaseClient";
 
 export function StandbyScreen() {
   const [time, setTime] = useState(new Date());
@@ -40,55 +40,33 @@ export function StandbyScreen() {
     };
     requestPermissions();
 
-    const socket = initSocket();
-
-    const registerOp = () => {
-      if (phone) {
-        socket.emit("register-operator", {
-          phone: phone,
-          name: userName || "Operador",
-          rut: userRut
-        });
-        console.log("Operador registrado/re-registrado en el socket con teléfono:", phone);
-      }
-    };
-
-    // El registro inicial y las reconexiones se manejan
-    // en useIonViewWillEnter y a través de un listener unificado más abajo si es necesario.
-
-    const handleIncoming = (data: any) => {
-      console.log("Incoming call:", data);
-      setCallerData(data);
+    const channel = supabase.channel('emergency-calls');
+    channel.on('broadcast', { event: 'incoming-call' }, (payload) => {
+      console.log("Incoming call via Supabase:", payload);
+      setCallerData(payload.payload);
       handleIncomingCall();
-    };
-
-    socket.on('incoming-call', handleIncoming);
+    }).subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log("✅ Conectado a Supabase Realtime (emergency-calls)");
+      }
+    });
 
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => {
       clearInterval(t);
-      socket.off('incoming-call', handleIncoming);
+      channel.unsubscribe();
     };
   }, []);
 
   useIonViewWillEnter(() => {
-    const socket = getSocket();
-    if (socket && phone && userRut) {
-      socket.emit("register-operator", {
-        phone,
-        name: userName || "Operador",
-        rut: userRut
-      });
-      console.log("Re-registrando operador al volver a la pantalla principal");
-
-      // Re-agregar listener de llamada entrante para que funcione la segunda llamada.
-      // El listener del useEffect inicial puede haberse perdido tras la navegación.
-      socket.off("incoming-call");
-      socket.on("incoming-call", (data: any) => {
-        console.log("Incoming call (re-registered):", data);
-        setCallerData(data);
-        handleIncomingCall();
-      });
+    if (phone && userRut) {
+      supabase
+        .from("operadores")
+        .update({ is_available: true, phone, name: userName || "Operador" })
+        .eq("rut", userRut)
+        .then(({ error }) => {
+          if (!error) console.log("Re-registrando operador (Disponible) en Supabase");
+        });
     }
   });
 
@@ -134,9 +112,13 @@ export function StandbyScreen() {
     } catch (e) {
       console.error("Error stopping alarm:", e);
     }
-    const socket = initSocket();
     if (callerData?.roomId) {
-      socket.emit('reject-call', { roomId: callerData.roomId });
+      const roomChannel = supabase.channel(`room-${callerData.roomId}`);
+      roomChannel.send({
+        type: 'broadcast',
+        event: 'call-ended',
+        payload: { reason: 'rejected' }
+      });
     }
     setShowIncomingCall(false);
     setCallerData(null);

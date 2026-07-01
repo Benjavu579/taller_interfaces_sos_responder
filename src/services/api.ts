@@ -1,111 +1,55 @@
-import { io, Socket } from 'socket.io-client';
-import { Capacitor } from '@capacitor/core';
-import { useAppStore } from '../store/useAppStore';
-
-// Por defecto usamos localhost para la web, pero en Android necesitas la IP local
-// Puedes reemplazar la IP 192.168.1.X por la IP de tu computadora en tu red Wi-Fi
-const isCapacitor = Capacitor.isNativePlatform();
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || (isCapacitor ? 'http://192.168.1.20:3000' : (window.location.protocol === 'https:' ? window.location.origin : 'http://192.168.1.20:3000'));
-
-let socket: Socket | null = null;
+import { supabase } from '../supabaseClient';
 
 /**
- * Inicializa la conexión por WebSockets con el backend.
+ * Inicia sesión del operador verificando RUT y contraseña en 'usuarios' y 'interprete'.
  */
-export const initSocket = (userId?: string): Socket => {
-  if (!socket) {
-    socket = io(BACKEND_URL, {
-      query: { userId, role: 'interprete' }
-    });
-
-    socket.on('connect', () => {
-      console.log('✅ Conectado al servidor Socket.IO');
-      const state = useAppStore.getState();
-      if (state.userPhone && state.userRut) {
-        socket?.emit('register-operator', {
-          phone: state.userPhone,
-          name: state.userName || 'Operador',
-          rut: state.userRut
-        });
-        console.log('🔄 Operador re-registrado en el servidor tras reconexión');
-      }
-    });
-
-    socket.on('connect_error', (error) => {
-      console.error('❌ Error de conexión Socket.IO:', error.message, 'URL usada:', BACKEND_URL);
-    });
-
-    socket.on('disconnect', () => {
-      console.log('❌ Desconectado del servidor');
-    });
-  }
-  return socket;
-};
-
-/**
- * Retorna la instancia actual del socket
- */
-export const getSocket = (): Socket | null => {
-  return socket;
-};
-
-/**
- * Envía la ubicación GPS del usuario al backend usando Fetch.
- * @param lat Latitud
- * @param lng Longitud
- * @param userId ID del usuario (opcional)
- */
-export const sendLocationData = async (lat: number, lng: number, userId?: string) => {
+export const loginOperator = async (rut: string, password?: string) => {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/gps`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        lat,
-        lng,
-        userId: userId || 'anonymous',
-        timestamp: new Date().toISOString()
-      })
-    });
+    // 1. Buscar al usuario y verificar contraseña
+    const { data: user, error: userError } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('rut', rut)
+      .eq('password', password)
+      .single();
 
-    if (!response.ok) {
-      throw new Error(`Error en el servidor: ${response.status}`);
+    if (userError || !user) {
+      throw new Error('Credenciales incorrectas (RUT o contraseña).');
     }
 
-    console.log('📍 Ubicación enviada correctamente:', { lat, lng });
-    return await response.json();
-  } catch (error) {
-    console.error('❌ Error enviando ubicación:', error);
-    // Nota: Como no tienes el backend aún, esto fallará por defecto.
-  }
-};
+    // 2. Verificar que el usuario sea un intérprete
+    const { data: interprete, error: interpreteError } = await supabase
+      .from('interprete')
+      .select('*')
+      .eq('rut', rut)
+      .single();
 
-/**
- * Inicia sesión del operador en el backend.
- * @param rut RUT del operador
- * @param password Contraseña
- */
-export const loginOperator = async (rut: string, password: string) => {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ rut, password, role: 'interprete' })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || data.error || 'Error de autenticación');
+    if (interpreteError || !interprete) {
+      throw new Error('El usuario no está registrado como intérprete/operador.');
     }
 
-    return data;
+    // Unir los datos para el estado local
+    return { data: { ...user, phone: interprete.phone } };
   } catch (error: any) {
     console.error('❌ Error en el inicio de sesión:', error);
     throw error;
+  }
+};
+
+/**
+ * Envía la ubicación GPS del usuario a la tabla 'alertas' de Supabase.
+ */
+export const sendLocationData = async (lat: number, lng: number, rut?: string, name?: string, button?: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('alertas')
+      .insert([{ lat, lng, user_rut: rut, user_name: name, button_color: button }]);
+
+    if (error) throw error;
+
+    console.log('📍 Ubicación de emergencia enviada correctamente:', { lat, lng });
+    return data;
+  } catch (error) {
+    console.error('❌ Error enviando ubicación de emergencia:', error);
   }
 };

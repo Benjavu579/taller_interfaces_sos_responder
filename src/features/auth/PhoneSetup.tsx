@@ -3,7 +3,7 @@ import { Lock } from "lucide-react";
 import { IonPage, IonContent } from "@ionic/react";
 import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
-import { initSocket } from "../../services/api";
+import { supabase } from "../../supabaseClient";
 
 export function PhoneSetup() {
   const [phone, setPhone] = useState("");
@@ -38,13 +38,14 @@ export function PhoneSetup() {
     const fullPhone = "+569" + phone;
     setPhoneAction(fullPhone);
     
-    // Registrar el operador en el backend
-    const socket = initSocket(useAppStore.getState().userRut || "operator");
-    socket.emit("register-operator", { 
-      phone: fullPhone, 
-      name: userName || "Operador",
-      rut: useAppStore.getState().userRut
-    });
+    // Registrar el operador en Supabase (tabla interprete)
+    const rut = useAppStore.getState().userRut;
+    if (rut) {
+      await supabase
+        .from("interprete")
+        .update({ phone: fullPhone })
+        .eq("rut", rut);
+    }
 
     history.push("/tabs/main");
   };

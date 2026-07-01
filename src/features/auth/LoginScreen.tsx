@@ -3,7 +3,7 @@ import { Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { IonPage, IonContent, IonModal } from "@ionic/react";
 import { useHistory } from "react-router";
 import { useAppStore } from "../../store/useAppStore";
-import { initSocket, loginOperator } from "../../services/api";
+import { loginOperator } from "../../services/api";
 
 function formatRut(value: string): string {
   const clean = value.replace(/[^0-9kK]/g, "");
@@ -57,17 +57,6 @@ export function LoginScreen() {
       
       if (response.data?.phone) {
         setPhone(response.data.phone);
-      }
-      
-      const socket = initSocket(rut);
-      socket.emit("operator-online", { rut, name: realName });
-      
-      if (response.data?.phone) {
-        socket.emit("register-operator", { 
-          phone: response.data.phone, 
-          name: realName,
-          rut: rut
-        });
       }
 
       history.replace("/");

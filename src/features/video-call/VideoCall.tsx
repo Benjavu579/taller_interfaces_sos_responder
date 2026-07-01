@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Camera, CameraOff, PhoneOff } from "lucide-react";
 import { IonPage, IonContent } from "@ionic/react";
 import { useHistory } from "react-router";
-import { getSocket } from "../../services/api";
+import { supabase } from "../../supabaseClient";
 import EmergencyAlarm from "../../services/EmergencyAlarm";
 
 export function VideoCall() {
@@ -25,12 +25,7 @@ export function VideoCall() {
     // Detener la alarma nativa cuando el guardia contesta
     EmergencyAlarm.stopAlarm().catch(console.error);
 
-    const socket = getSocket();
-    if (!socket) {
-      console.error("No hay socket disponible");
-      return;
-    }
-
+    const channel = supabase.channel(`room-${roomId}`);
     let pc: RTCPeerConnection | null = null;
 
     const initWebRTC = async () => {
@@ -68,8 +63,12 @@ export function VideoCall() {
 
         // 5. Enviar ICE candidates
         pc.onicecandidate = (event) => {
-          if (event.candidate && socket) {
-            socket.emit("webrtc-ice-candidate", { candidate: event.candidate, roomId });
+          if (event.candidate) {
+            channel.send({
+              type: "broadcast",
+              event: "webrtc-ice-candidate",
+              payload: event.candidate
+            });
           }
         };
 
@@ -77,23 +76,23 @@ export function VideoCall() {
           console.log("ICE state:", pc?.iceConnectionState);
         };
 
-        // Limpiar listeners WebRTC antes de agregar nuevos (evitar duplicados en segunda llamada)
-        socket.off("webrtc-offer");
-        socket.off("webrtc-ice-candidate");
-        socket.off("call-ended");
-
-        // 6. Escuchar eventos de señalización ANTES de join-call
-        socket.on("webrtc-offer", async (offer) => {
+        // 6. Escuchar eventos de señalización
+        channel.on("broadcast", { event: "webrtc-offer" }, async ({ payload: offer }) => {
           console.log("📨 Offer recibida del sordo");
           if (!pcRef.current || !offer) return;
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
           const answer = await pcRef.current.createAnswer();
           await pcRef.current.setLocalDescription(answer);
-          socket.emit("webrtc-answer", { answer, roomId });
+          
+          channel.send({
+            type: "broadcast",
+            event: "webrtc-answer",
+            payload: answer
+          });
           console.log("📤 Answer enviada");
         });
 
-        socket.on("webrtc-ice-candidate", async (candidate) => {
+        channel.on("broadcast", { event: "webrtc-ice-candidate" }, async ({ payload: candidate }) => {
           if (candidate && pcRef.current) {
             try {
               await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
@@ -103,14 +102,22 @@ export function VideoCall() {
           }
         });
 
-        socket.on("call-ended", () => {
+        channel.on("broadcast", { event: "call-ended" }, () => {
           console.log("El otro usuario cortó la llamada");
           history.goBack();
         });
 
-        // 7. Emitir join-call SOLO cuando todo está listo
-        console.log("✅ WebRTC listo, uniéndose a la sala:", roomId);
-        socket.emit("join-call", { roomId });
+        // 7. Emitir join-call al suscribirse
+        channel.subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            console.log("✅ WebRTC listo, uniéndose a la sala:", roomId);
+            channel.send({
+              type: "broadcast",
+              event: "join-call",
+              payload: { roomId }
+            });
+          }
+        });
 
       } catch (err) {
         console.error("Error accediendo a la cámara/mic o inicializando WebRTC:", err);
@@ -126,12 +133,12 @@ export function VideoCall() {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       pcRef.current?.close();
       pcRef.current = null;
-      if (socket) {
-        socket.emit("leave-call", { roomId });
-        socket.off("webrtc-offer");
-        socket.off("webrtc-ice-candidate");
-        socket.off("call-ended");
-      }
+      channel.send({
+        type: "broadcast",
+        event: "leave-call",
+        payload: { roomId }
+      });
+      channel.unsubscribe();
     };
   }, []);
 
@@ -146,10 +153,13 @@ export function VideoCall() {
   };
 
   const handleHangup = () => {
-    const socket = getSocket();
-    if (socket) {
-      socket.emit("leave-call", { roomId });
-    }
+    const channel = supabase.channel(`room-${roomId}`);
+    channel.send({
+      type: "broadcast",
+      event: "leave-call",
+      payload: { roomId }
+    });
+
     streamRef.current?.getTracks().forEach((t) => t.stop());
     pcRef.current?.close();
     pcRef.current = null;

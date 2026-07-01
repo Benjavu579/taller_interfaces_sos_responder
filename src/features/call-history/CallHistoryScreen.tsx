@@ -9,7 +9,7 @@ import {
 } from '@ionic/react';
 import { callOutline, videocamOutline, closeCircleOutline, closeOutline, timeOutline, chevronForwardOutline } from 'ionicons/icons';
 import { CallRecord } from '../../services/mockData';
-import { BACKEND_URL } from '../../services/api';
+import { supabase } from '../../supabaseClient';
 
 export const CallHistoryScreen = () => {
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
@@ -19,12 +19,21 @@ export const CallHistoryScreen = () => {
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/api/historial`);
-        if (response.ok) {
-          const data = await response.json();
-          setHistoryData(data);
-        } else {
-          console.error("Error fetching history:", response.statusText);
+        const { data, error } = await supabase
+          .from('llamadas_historial')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error("Error fetching history from Supabase:", error);
+        } else if (data) {
+          // Adaptar los datos al formato del frontend
+          const formatted = data.map((d: any) => ({
+            ...d,
+            callerName: d.caller_name,
+            date: d.created_at,
+          }));
+          setHistoryData(formatted as any);
         }
       } catch (error) {
         console.error("Error fetching history", error);
